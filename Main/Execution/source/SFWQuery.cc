@@ -22,8 +22,8 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 	if (allTables.size () == 1) {
 		res = make_shared<LogicalTableScan> (allTables.begin()->second, allTables.begin()->second, 
 			make_shared <MyDB_Stats> (allTables.begin()->second), allDisjunctions);
+		res->getStats()->costSelection (allDisjunctions);
 		best = res->getStats()->getTupleCount();
-		cost = 
 	} else {
 		vector<pair<string, MyDB_TablePtr>> tables;
 		for (auto [alias, table] : allTables) {
@@ -31,6 +31,7 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 		}
 		
 		// find all ways to split the tables into two groups
+		set<map<string, MyDB_TablePtr>> checked;
 		for (int i = 1; i < (1 << tables.size ()); i++) {
 			map<string, MyDB_TablePtr> left, right;
 			for (int j = 0; j < tables.size (); j++) {
@@ -45,11 +46,24 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 				continue;
 			}
 
+			if (checked.find (left) != checked.end ()) {
+				checked.insert (left);
+				continue;
+			}
+			
 			// LeftCNF ← all clauses in C referring only to atts in Left
 			// RightCNF ← all clauses in C referring only to atts in Right
 			// TopCNF ← all clauses in C not in LeftCNF & not in RightCNF
-			
-
+			vector<ExprTreePtr> leftDisjunctions, rightDisjunctions, topDisjunctions;
+			for (auto d : allDisjunctions) {
+				// if (a->referencesTable ()) {
+				// 	leftDisjunctions.push_back (a);
+				// } else if (a->referencesTable ()) {
+				// 	rightDisjunctions.push_back (a);
+				// } else {
+				// 	topDisjunctions.push_back (a);
+				// }
+			}
 
 			// LeftAtts ← Atts(Left) and (A union Atts(TopCNF))
 			// RightAtts ← Atts(Right) and (A union Atts(TopCNF))
@@ -67,17 +81,19 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 				}
 			}
 
-			vector<ExprTreePtr> leftDisjunctions, rightDisjunctions;
-
 			pair<LogicalOpPtr, double> leftRes = optimizeQueryPlan (left, leftSchema, leftDisjunctions);
 			pair<LogicalOpPtr, double> rightRes = optimizeQueryPlan (right, rightSchema, rightDisjunctions);
 
 			if (leftRes.first == nullptr || rightRes.first == nullptr) {
 				continue;
 			}
-
-			if (leftRes.second + rightRes.second < best) {
-				best = leftRes.second + rightRes.second;
+			
+			leftRes.first->getStats()->costSelection (leftDisjunctions);
+			rightRes.first->getStats()->costSelection (rightDisjunctions);
+			leftRes.first->getStats()->costJoin(topDisjunctions, rightRes.first->getStats());
+			cost = leftRes.second + rightRes.second;
+			if (cost < best) {
+				best = cost;
 				res = make_shared<LogicalJoin> (leftRes.first, rightRes.first, totSchema, allDisjunctions, 
 					make_shared <MyDB_Stats> (leftRes.first->getStats(), rightRes.first->getStats()));
 			}
