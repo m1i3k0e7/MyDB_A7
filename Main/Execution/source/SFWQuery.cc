@@ -19,22 +19,27 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 	double cost = 9e99, best = 9e99;
 
 	// case where no joins
-	if (allTables.size () == 1) {
-		res = make_shared<LogicalTableScan> (allTables.begin()->second, allTables.begin()->second, 
-			make_shared <MyDB_Stats> (allTables.begin()->second), allDisjunctions);
+	if (allTables.size() == 1) {
+		map<string, MyDB_TablePtr> tables;
+		for (auto [alias, table] : allTables) {
+			MyDB_TablePtr tempTable = table->alias(alias);
+			tables[alias] = tempTable;
+		}
+		res = make_shared<LogicalTableScan> (tables.begin()->second, tables.begin()->second, 
+			make_shared <MyDB_Stats> (tables.begin()->second), allDisjunctions);
 		res->getStats()->costSelection (allDisjunctions);
 		best = res->getStats()->getTupleCount();
 	} else {
 		vector<pair<string, MyDB_TablePtr>> tables;
 		for (auto [alias, table] : allTables) {
-			tables.push_back (make_pair (alias, table));
+			tables.push_back (make_pair(alias, table));
 		}
 		
 		// find all ways to split the tables into two groups
 		set<map<string, MyDB_TablePtr>> checked;
-		for (int i = 1; i < (1 << tables.size ()); i++) {
+		for (int i = 1; i < (1 << tables.size()); i++) {
 			map<string, MyDB_TablePtr> left, right;
-			for (int j = 0; j < tables.size (); j++) {
+			for (int j = 0; j < tables.size(); j++) {
 				if (i & (1 << j)) {
 					left[tables[j].first] = tables[j].second;
 				} else {
@@ -42,12 +47,12 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 				}
 			}
 			
-			if (left.size () == 0 || right.size () == 0) {
+			if (left.size() == 0 || right.size() == 0) {
 				continue;
 			}
 
-			if (checked.find (left) != checked.end ()) {
-				checked.insert (left);
+			if (checked.find(left) != checked.end()) {
+				checked.insert(left);
 				continue;
 			}
 			
@@ -56,33 +61,27 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 			// TopCNF ← all clauses in C not in LeftCNF & not in RightCNF
 			vector<ExprTreePtr> leftDisjunctions, rightDisjunctions, topDisjunctions;
 			for (auto d : allDisjunctions) {
-				// if (a->referencesTable ()) {
-				// 	leftDisjunctions.push_back (a);
-				// } else if (a->referencesTable ()) {
-				// 	rightDisjunctions.push_back (a);
-				// } else {
-				// 	topDisjunctions.push_back (a);
-				// }
+				
 			}
 
 			// LeftAtts ← Atts(Left) and (A union Atts(TopCNF))
 			// RightAtts ← Atts(Right) and (A union Atts(TopCNF))
-			MyDB_SchemaPtr leftSchema = make_shared <MyDB_Schema> (), rightSchema = make_shared <MyDB_Schema> ();
+			MyDB_SchemaPtr leftSchema = make_shared <MyDB_Schema>(), rightSchema = make_shared <MyDB_Schema>();
 			for (auto [alias, table] : left) {
-				MyDB_TablePtr tempTable = table->alias(alias);
-				for (auto [attName, attType] : tempTable->getSchema()->getAtts ()) {
-					leftSchema->appendAtt (make_pair (attName, attType));
+				// MyDB_TablePtr tempTable = table->alias(alias);
+				for (auto [attName, attType] : table->getSchema()->getAtts()) {
+					leftSchema->appendAtt(make_pair(attName, attType));
 				}
 			}
 			for (auto [alias, table] : right) {
-				MyDB_TablePtr tempTable = table->alias(alias);
-				for (auto [attName, attType] : tempTable->getSchema()->getAtts ()) {
-					rightSchema->appendAtt (make_pair (attName, attType));
+				// MyDB_TablePtr tempTable = table->alias(alias);
+				for (auto [attName, attType] : table->getSchema()->getAtts()) {
+					rightSchema->appendAtt(make_pair (attName, attType));
 				}
 			}
 
-			pair<LogicalOpPtr, double> leftRes = optimizeQueryPlan (left, leftSchema, leftDisjunctions);
-			pair<LogicalOpPtr, double> rightRes = optimizeQueryPlan (right, rightSchema, rightDisjunctions);
+			pair<LogicalOpPtr, double> leftRes = optimizeQueryPlan(left, leftSchema, leftDisjunctions);
+			pair<LogicalOpPtr, double> rightRes = optimizeQueryPlan(right, rightSchema, rightDisjunctions);
 
 			if (leftRes.first == nullptr || rightRes.first == nullptr) {
 				continue;
