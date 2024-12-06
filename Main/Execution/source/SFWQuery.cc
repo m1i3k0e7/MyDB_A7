@@ -167,23 +167,23 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 
 		// LeftAtts ← Atts(Left) and (A union Atts(TopCNF))
 		// RightAtts ← Atts(Right) and (A union Atts(TopCNF))
-		MyDB_SchemaPtr leftSchema = make_shared<MyDB_Schema>(), rightSchema = make_shared<MyDB_Schema>();
-		for (auto [alias, table] : left)
-		{
-			// MyDB_TablePtr tempTable = table->alias(alias);
-			for (auto [attName, attType] : table->getSchema()->getAtts())
-			{
-				leftSchema->appendAtt(make_pair(attName, attType));
-			}
-		}
-		for (auto [alias, table] : right)
-		{
-			// MyDB_TablePtr tempTable = table->alias(alias);
-			for (auto [attName, attType] : table->getSchema()->getAtts())
-			{
-				rightSchema->appendAtt(make_pair(attName, attType));
-			}
-		}
+		// MyDB_SchemaPtr leftSchema = make_shared<MyDB_Schema>(), rightSchema = make_shared<MyDB_Schema>();
+		// for (auto [alias, table] : left)
+		// {
+		// 	// MyDB_TablePtr tempTable = table->alias(alias);
+		// 	for (auto [attName, attType] : table->getSchema()->getAtts())
+		// 	{
+		// 		leftSchema->appendAtt(make_pair(attName, attType));
+		// 	}
+		// }
+		// for (auto [alias, table] : right)
+		// {
+		// 	// MyDB_TablePtr tempTable = table->alias(alias);
+		// 	for (auto [attName, attType] : table->getSchema()->getAtts())
+		// 	{
+		// 		rightSchema->appendAtt(make_pair(attName, attType));
+		// 	}
+		// }
 
 		pair<LogicalOpPtr, double> leftRes = optimizeQueryPlan(left, leftSchema, leftDisjunctions);
 		pair<LogicalOpPtr, double> rightRes = optimizeQueryPlan(right, rightSchema, rightDisjunctions);
@@ -193,15 +193,24 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 			continue;
 		}
 
-		leftRes.first->getStats()->costSelection(leftDisjunctions);
-		rightRes.first->getStats()->costSelection(rightDisjunctions);
-		leftRes.first->getStats()->costJoin(topDisjunctions, rightRes.first->getStats());
-		cost = leftRes.second + rightRes.second;
-		if (cost < best)
-		{
+		// Apply selection predicates to update statistics
+		MyDB_StatsPtr leftStats = leftRes.first->getStats()->costSelection(leftDisjunctions);
+		MyDB_StatsPtr rightStats = rightRes.first->getStats()->costSelection(rightDisjunctions);
+
+		// Apply join predicates to calculate join cost
+		MyDB_StatsPtr joinStats = leftStats->costJoin(topDisjunctions, rightStats);
+
+		MyDB_StatsPtr joinStats = leftStats->costJoin(topDisjunctions, rightStats);
+
+		// Compute total cost
+		cost = leftRes.second + rightRes.second + joinStats->getTupleCount();
+
+		if (cost < best) {
 			best = cost;
-			res = make_shared<LogicalJoin>(leftRes.first, rightRes.first, totSchema, allDisjunctions,
-										   make_shared<MyDB_Stats>(leftRes.first->getStats(), rightRes.first->getStats()));
+			res = make_shared<LogicalJoin>(
+				leftRes.first, rightRes.first,
+				make_shared<MyDB_Table>("JoinResult", "outputPath", totSchema),
+				allDisjunctions, joinStats);
 		}
 	}
 
