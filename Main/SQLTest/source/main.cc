@@ -167,7 +167,7 @@ int main (int numArgs, char **args) {
 						pair<LogicalOpPtr, double> myPlan = final->optimizeQuery (allTables);
 						cout << "Cost was: " << myPlan.second << "\n";
 						// un-comment once everything is working!!
-						// myPlan.first->print ();
+						myPlan.first->print ();
 					}
 
 					// get outta here

@@ -39,18 +39,22 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		tables[alias] = allTables[table];
 	}
 
-	cout << "Tables: " << tables.size() << "\n";
-	for (auto &entry : tables)
-	{	
-		cout << "Table: " << entry.first << "\n";
-		for (auto &att : entry.second->getSchema()->getAtts())
-		{
-			totSchema->appendAtt(att);
-		}
-	}
-	// cout << "Disjunctions: " << allDisjunctions.size() << "\n";
+	cout << "Total Predicates: " << allDisjunctions.size() << endl;
+    for (auto& pred : allDisjunctions) {
+        cout << "Predicate: " << pred->toString() << endl;
+    }
 
-	return optimizeQueryPlan(tables, totSchema, allDisjunctions);
+    // Detailed schema building
+    for (auto &entry : tables)
+    {   
+        cout << "Table: " << entry.first << "\n";
+        for (auto &att : entry.second->getSchema()->getAtts())
+        {
+            totSchema->appendAtt(att);
+        }
+    }
+
+    return optimizeQueryPlan(tables, totSchema, allDisjunctions);
 }
 
 // builds and optimizes a logical query plan for a SFW query, returning the logical query plan
@@ -68,8 +72,12 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		auto alias = allTables.begin()->first;
 		auto table = allTables.begin()->second->alias(alias);
 
-		res = make_shared<LogicalTableScan>(table, table, make_shared<MyDB_Stats>(table), allDisjunctions);
-		MyDB_StatsPtr stats = res->getStats()->costSelection(allDisjunctions);
+		// Create output table specification with schema for single table case
+		MyDB_TablePtr outputSpec = make_shared<MyDB_Table>("SingleTableOutput_" + alias, "output_" + alias + ".bin", totSchema);
+		auto outputStats = make_shared<MyDB_Stats>(table);
+		MyDB_StatsPtr stats = outputStats->costSelection(allDisjunctions);
+		res = make_shared<LogicalTableScan>(table, outputSpec, stats, allDisjunctions);
+		
 		best = stats->getTupleCount();
 		return make_pair(res, best);
 	}
@@ -132,17 +140,18 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 				}
 			}
 
-			if (refersToLeft && !refersToRight)
+			if (refersToLeft && refersToRight)
+			{
+				// If it references both sides, it's a join condition
+				topDisjunctions.push_back(disjunction);
+			}
+			else if (refersToLeft)
 			{
 				leftDisjunctions.push_back(disjunction);
 			}
-			else if (refersToRight && !refersToLeft)
+			else if (refersToRight)
 			{
 				rightDisjunctions.push_back(disjunction);
-			}
-			else
-			{
-				topDisjunctions.push_back(disjunction);
 			}
 		}
 
@@ -154,58 +163,58 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 
 		// LeftAtts ← Atts(Left) ∩ (A ∪ Atts(TopCNF))
 		// RightAtts ← Atts(Right) ∩ (A ∪ Atts(TopCNF))
-		MyDB_SchemaPtr leftSchema = make_shared<MyDB_Schema>(), rightSchema = make_shared<MyDB_Schema>();
-        for (auto &entry : left) {
-            auto alias = entry.first;
-            auto table = entry.second;
-            for (auto &att : table->getSchema()->getAtts()) {
-                string attName = att.first;
-                MyDB_AttTypePtr attType = att.second;
-                if (allAtts.count(make_pair(attName, attType)) ||
-                    any_of(topDisjunctions.begin(), topDisjunctions.end(),
-                           [&alias, &attName](ExprTreePtr disjunction) {
-                               return disjunction->referencesAtt(alias, attName);
-                           })) {
-                    leftSchema->appendAtt(make_pair(attName, attType));
-                }
-            }
-        }
+		// MyDB_SchemaPtr leftSchema = make_shared<MyDB_Schema>(), rightSchema = make_shared<MyDB_Schema>();
+        // for (auto &entry : left) {
+        //     auto alias = entry.first;
+        //     auto table = entry.second;
+        //     for (auto &att : table->getSchema()->getAtts()) {
+        //         string attName = att.first;
+        //         MyDB_AttTypePtr attType = att.second;
+        //         if (allAtts.count(make_pair(attName, attType)) ||
+        //             any_of(topDisjunctions.begin(), topDisjunctions.end(),
+        //                    [&alias, &attName](ExprTreePtr disjunction) {
+        //                        return disjunction->referencesAtt(alias, attName);
+        //                    })) {
+        //             leftSchema->appendAtt(make_pair(attName, attType));
+        //         }
+        //     }
+        // }
 
-        for (auto &entry : right) {
-            auto alias = entry.first;
-            auto table = entry.second;
-            for (auto &att : table->getSchema()->getAtts()) {
-                string attName = att.first;
-                MyDB_AttTypePtr attType = att.second;
-                if (allAtts.count(make_pair(attName, attType)) ||
-                    any_of(topDisjunctions.begin(), topDisjunctions.end(),
-                           [&alias, &attName](ExprTreePtr disjunction) {
-                               return disjunction->referencesAtt(alias, attName);
-                           })) {
-                    rightSchema->appendAtt(make_pair(attName, attType));
-                }
-            }
-        }
+        // for (auto &entry : right) {
+        //     auto alias = entry.first;
+        //     auto table = entry.second;
+        //     for (auto &att : table->getSchema()->getAtts()) {
+        //         string attName = att.first;
+        //         MyDB_AttTypePtr attType = att.second;
+        //         if (allAtts.count(make_pair(attName, attType)) ||
+        //             any_of(topDisjunctions.begin(), topDisjunctions.end(),
+        //                    [&alias, &attName](ExprTreePtr disjunction) {
+        //                        return disjunction->referencesAtt(alias, attName);
+        //                    })) {
+        //             rightSchema->appendAtt(make_pair(attName, attType));
+        //         }
+        //     }
+        // }
 
 		// LeftAtts ← Atts(Left) and (A union Atts(TopCNF))
 		// RightAtts ← Atts(Right) and (A union Atts(TopCNF))
-		// MyDB_SchemaPtr leftSchema = make_shared<MyDB_Schema>(), rightSchema = make_shared<MyDB_Schema>();
-		// for (auto [alias, table] : left)
-		// {
-		// 	// MyDB_TablePtr tempTable = table->alias(alias);
-		// 	for (auto [attName, attType] : table->getSchema()->getAtts())
-		// 	{
-		// 		leftSchema->appendAtt(make_pair(attName, attType));
-		// 	}
-		// }
-		// for (auto [alias, table] : right)
-		// {
-		// 	// MyDB_TablePtr tempTable = table->alias(alias);
-		// 	for (auto [attName, attType] : table->getSchema()->getAtts())
-		// 	{
-		// 		rightSchema->appendAtt(make_pair(attName, attType));
-		// 	}
-		// }
+		MyDB_SchemaPtr leftSchema = make_shared<MyDB_Schema>(), rightSchema = make_shared<MyDB_Schema>();
+		for (auto [alias, table] : left)
+		{
+			// MyDB_TablePtr tempTable = table->alias(alias);
+			for (auto [attName, attType] : table->getSchema()->getAtts())
+			{
+				leftSchema->appendAtt(make_pair(attName, attType));
+			}
+		}
+		for (auto [alias, table] : right)
+		{
+			// MyDB_TablePtr tempTable = table->alias(alias);
+			for (auto [attName, attType] : table->getSchema()->getAtts())
+			{
+				rightSchema->appendAtt(make_pair(attName, attType));
+			}
+		}
 
 		pair<LogicalOpPtr, double> leftRes = optimizeQueryPlan(left, leftSchema, leftDisjunctions);
 		pair<LogicalOpPtr, double> rightRes = optimizeQueryPlan(right, rightSchema, rightDisjunctions);
@@ -216,31 +225,17 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		}
 
 		// Apply selection predicates to update statistics
-		MyDB_StatsPtr leftStats = leftRes.first->getStats()->costSelection(leftDisjunctions);
-		MyDB_StatsPtr rightStats = rightRes.first->getStats()->costSelection(rightDisjunctions);
+		MyDB_StatsPtr leftStats = leftRes.first->getStats();
+		MyDB_StatsPtr rightStats = rightRes.first->getStats();
 
 		// Apply join predicates to calculate join cost
 		MyDB_StatsPtr joinStats = leftStats->costJoin(topDisjunctions, rightStats);
 
 		double joinCost = joinStats->getTupleCount(); // Focus on the size of the join result
-		double leftCost = leftRes.second;  // Recursive left cost (excluding tuple count)
-		double rightCost = rightRes.second;  // Recursive right cost (excluding tuple count)
+		// double leftCost = leftRes.second + leftStats->getTupleCount();  // Recursive left cost (excluding tuple count)
+		// double rightCost = rightRes.second + rightStats->getTupleCount();  // Recursive right cost (excluding tuple count)
 
-		// Step 7: Add the costs of left, right, and join together, but avoid double-counting the tuple counts
-		// cout<<"joinCost tuple count:" << joinStats->getTupleCount()<<endl;
-		// cout<<"joinCost att count:" << joinStats->getAttVals("AND")<<endl;
-
-		// for what ever reason, joinCost * 2 will wotk on example 4...
-		cost = leftCost + rightCost + joinCost*2;
-
-
-		// cost = joinStats->getTupleCount(); // Focus on the size of the join result
-
-		// // Optional: Add penalties or weights for inputs
-		// double leftCost = leftRes.second + leftStats->getTupleCount(); // Recursive left cost
-		// double rightCost = rightRes.second + rightStats->getTupleCount(); // Recursive right cost
-
-		// cost += leftCost + rightCost;
+		cost = leftRes.second + rightRes.second + joinCost;
 
 		if (cost < best) {
 			best = cost;
