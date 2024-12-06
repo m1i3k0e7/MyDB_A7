@@ -64,6 +64,7 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 	// case where no joins
 	if (allTables.size() == 1)
 	{
+		cout<<"Where table size is 1"<<endl;
 		auto alias = allTables.begin()->first;
 		auto table = allTables.begin()->second->alias(alias);
 
@@ -76,6 +77,7 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 	}
 	
 	// multiple tables case
+	cout<<"Where table size is more than 1"<<endl;
 	vector<pair<string, MyDB_TablePtr>> tables;
     for (auto &entry : allTables) {
         tables.push_back(make_pair(entry.first, entry.second));
@@ -214,6 +216,21 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		{
 			continue;
 		}
+		cout<<"-------------------"<<endl;
+		// **Print the current combination of tables**
+		cout << "Combination:\n";
+		cout << "  Left tables: ";
+		for (auto &[alias, table] : left) {
+			cout << alias << " ";
+		}
+		cout << "\n";
+
+		cout << "  Right tables: ";
+		for (auto &[alias, table] : right) {
+			cout << alias << " ";
+		}
+		cout << "\n";
+		cout<<"-------------------"<<endl;
 
 		// Apply selection predicates to update statistics
 		MyDB_StatsPtr leftStats = leftRes.first->getStats()->costSelection(leftDisjunctions);
@@ -221,16 +238,31 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 
 		// Apply join predicates to calculate join cost
 		MyDB_StatsPtr joinStats = leftStats->costJoin(topDisjunctions, rightStats);
+		cout << "Calculating join cost..." << endl;
+		cout << "Left Stats: "; leftStats->print();
+		cout << "Right Stats: "; rightStats->print();
+		cout << "Join Predicates: "; for (auto &pred : topDisjunctions) cout << pred->toString() << " ";
+		cout << endl;
 
 		// Compute total cost
 		// cost = leftRes.second + rightRes.second + joinStats->getTupleCount();
-		cost = leftStats->getTupleCount() + rightStats->getTupleCount() + joinStats->getTupleCount();
+		cost = joinStats->getTupleCount(); // Focus on the size of the join result
+
+		// Optional: Add penalties or weights for inputs
+		double leftCost = leftRes.second + leftStats->getTupleCount(); // Recursive left cost
+		double rightCost = rightRes.second + rightStats->getTupleCount(); // Recursive right cost
+		cout << "Left cost: " << leftCost << endl;
+		cout << "Right cost: " << rightCost << endl;
+		cout<<"Join cost: "<<cost<<endl;
+		cost += leftCost + rightCost;
+		cout<<"Total cost: "<<cost<<endl;
 		if (cost < best) {
 			best = cost;
 			res = make_shared<LogicalJoin>(
 				leftRes.first, rightRes.first,
 				make_shared<MyDB_Table>("JoinResult", "outputPath", totSchema),
 				allDisjunctions, joinStats);
+				cout << "Updated best plan with cost: " << best << endl;
 		}
 	}
 	// we have at least one join
