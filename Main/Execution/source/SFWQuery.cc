@@ -4,7 +4,25 @@
 
 #include "ParserTypes.h"
 #include <unordered_set>
+#include <utility>
+#include <functional>
 
+struct PairHash {
+	template <typename T1, typename T2>
+	size_t operator()(const std::pair<T1, T2>& pair) const {
+		size_t hash1 = std::hash<T1>()(pair.first);
+		size_t hash2 = std::hash<T2>()(pair.second);
+		return hash1 ^ (hash2 << 1); // Combine the hashes
+	}
+};
+
+// Custom equality comparator for std::pair<std::string, std::shared_ptr<MyDB_AttType>>
+struct PairEqual {
+	template <typename T1, typename T2>
+	bool operator()(const std::pair<T1, T2>& lhs, const std::pair<T1, T2>& rhs) const {
+		return lhs.first == rhs.first && lhs.second == rhs.second;
+	}
+};
 // builds and optimizes a logical query plan for a SFW query, returning the logical query plan
 pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePtr> &allTables)
 {
@@ -36,10 +54,9 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 
 	// multiple tables case
 	vector<pair<string, MyDB_TablePtr>> tables;
-	for (auto [alias, table] : allTables)
-	{
-		tables.push_back(make_pair(alias, table));
-	}
+    for (auto &entry : allTables) {
+        tables.push_back(make_pair(entry.first, entry.second));
+    }
 
 	// find all ways to split the tables into two groups
 	set<map<string, MyDB_TablePtr>> checked;
@@ -58,16 +75,10 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 			}
 		}
 
-		if (left.empty() || right.empty() || checked.count(left))
-		{
-			continue;
-		}
-
-		if (checked.find(left) != checked.end())
-		{
-			checked.insert(left);
-			continue;
-		}
+		if (left.empty() || right.empty() || checked.count(left)) {
+            continue;
+        }
+        checked.insert(left);
 
 		// LeftCNF ← all clauses in C referring only to atts in Left
 		// RightCNF ← all clauses in C referring only to atts in Right
@@ -112,7 +123,9 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		}
 
 		// build A
-		unordered_set<pair<string, MyDB_AttTypePtr>> allAtts;
+
+		std::unordered_set<std::pair<std::string, MyDB_AttTypePtr>, PairHash, PairEqual> allAtts;
+
 		for (auto s : totSchema->getAtts())
 		{
 			allAtts.insert(s);
@@ -121,49 +134,37 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		// LeftAtts ← Atts(Left) ∩ (A ∪ Atts(TopCNF))
 		// RightAtts ← Atts(Right) ∩ (A ∪ Atts(TopCNF))
 		MyDB_SchemaPtr leftSchema = make_shared<MyDB_Schema>(), rightSchema = make_shared<MyDB_Schema>();
-		for (auto [alias, table] : left)
-		{
-			for (auto [attName, attType] : table->getSchema()->getAtts())
-			{
-				if (allAtts.find(make_pair(attName, attType)) != allAtts.end())
-				{
-					leftSchema->appendAtt(make_pair(attName, attType));
-				}
-				else
-				{
-					for (auto disjunction : topDisjunctions)
-					{
-						if (disjunction->referencesAtt(alias, attName))
-						{
-							leftSchema->appendAtt(make_pair(attName, attType));
-							break;
-						}
-					}
-				}
-			}
-		}
+        for (auto &entry : left) {
+            auto alias = entry.first;
+            auto table = entry.second;
+            for (auto &att : table->getSchema()->getAtts()) {
+                string attName = att.first;
+                MyDB_AttTypePtr attType = att.second;
+                if (allAtts.count(make_pair(attName, attType)) ||
+                    any_of(topDisjunctions.begin(), topDisjunctions.end(),
+                           [&alias, &attName](ExprTreePtr disjunction) {
+                               return disjunction->referencesAtt(alias, attName);
+                           })) {
+                    leftSchema->appendAtt(make_pair(attName, attType));
+                }
+            }
+        }
 
-		for (auto [alias, table] : right)
-		{
-			for (auto [attName, attType] : table->getSchema()->getAtts())
-			{
-				if (allAtts.find(make_pair(attName, attType)) != allAtts.end())
-				{
-					rightSchema->appendAtt(make_pair(attName, attType));
-				}
-				else
-				{
-					for (auto disjunction : topDisjunctions)
-					{
-						if (disjunction->referencesAtt(alias, attName))
-						{
-							rightSchema->appendAtt(make_pair(attName, attType));
-							break;
-						}
-					}
-				}
-			}
-		}
+        for (auto &entry : right) {
+            auto alias = entry.first;
+            auto table = entry.second;
+            for (auto &att : table->getSchema()->getAtts()) {
+                string attName = att.first;
+                MyDB_AttTypePtr attType = att.second;
+                if (allAtts.count(make_pair(attName, attType)) ||
+                    any_of(topDisjunctions.begin(), topDisjunctions.end(),
+                           [&alias, &attName](ExprTreePtr disjunction) {
+                               return disjunction->referencesAtt(alias, attName);
+                           })) {
+                    rightSchema->appendAtt(make_pair(attName, attType));
+                }
+            }
+        }
 
 		// LeftAtts ← Atts(Left) and (A union Atts(TopCNF))
 		// RightAtts ← Atts(Right) and (A union Atts(TopCNF))
@@ -200,8 +201,6 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		// Apply join predicates to calculate join cost
 		MyDB_StatsPtr joinStats = leftStats->costJoin(topDisjunctions, rightStats);
 
-		MyDB_StatsPtr joinStats = leftStats->costJoin(topDisjunctions, rightStats);
-
 		// Compute total cost
 		cost = leftRes.second + rightRes.second + joinStats->getTupleCount();
 
@@ -213,9 +212,6 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 				allDisjunctions, joinStats);
 		}
 	}
-
-	return make_pair(res, best);
-
 	// we have at least one join
 	// some code here...
 	return make_pair(res, best);
