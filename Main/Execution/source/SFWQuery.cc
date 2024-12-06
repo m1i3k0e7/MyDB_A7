@@ -71,8 +71,6 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		res = make_shared<LogicalTableScan>(table, table, make_shared<MyDB_Stats>(table), allDisjunctions);
 		MyDB_StatsPtr stats = res->getStats()->costSelection(allDisjunctions);
 		best = stats->getTupleCount();
-		cout << "No joins\n";
-		cout << "Cost: " << best << "\n";
 		return make_pair(res, best);
 	}
 	
@@ -233,8 +231,8 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		cout<<"-------------------"<<endl;
 
 		// Apply selection predicates to update statistics
-		MyDB_StatsPtr leftStats = leftRes.first->getStats()->costSelection(leftDisjunctions);
-		MyDB_StatsPtr rightStats = rightRes.first->getStats()->costSelection(rightDisjunctions);
+		// MyDB_StatsPtr leftStats = leftRes.first->getStats()->costSelection(leftDisjunctions);
+		// MyDB_StatsPtr rightStats = rightRes.first->getStats()->costSelection(rightDisjunctions);
 
 		// Apply join predicates to calculate join cost
 		MyDB_StatsPtr joinStats = leftStats->costJoin(topDisjunctions, rightStats);
