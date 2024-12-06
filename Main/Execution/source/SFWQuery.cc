@@ -9,6 +9,8 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 
 	// here we call the recursive, exhaustive enum. algorithm
 	// return optimizeQueryPlan (...);
+	MyDB_SchemaPtr totSchema = make_shared<MyDB_Schema>();
+    return optimizeQueryPlan(allTables, totSchema, allDisjunctions);
 }
 
 // builds and optimizes a logical query plan for a SFW query, returning the logical query plan
@@ -29,7 +31,10 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 			make_shared <MyDB_Stats> (tables.begin()->second), allDisjunctions);
 		res->getStats()->costSelection (allDisjunctions);
 		best = res->getStats()->getTupleCount();
+
+		return make_pair(res, best);
 	} else {
+		//multiple tables case
 		vector<pair<string, MyDB_TablePtr>> tables;
 		for (auto [alias, table] : allTables) {
 			tables.push_back (make_pair(alias, table));
@@ -47,7 +52,7 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 				}
 			}
 			
-			if (left.size() == 0 || right.size() == 0) {
+			if (left.empty() || right.empty() || checked.count(left)) {
 				continue;
 			}
 
@@ -60,8 +65,32 @@ pair <LogicalOpPtr, double> SFWQuery :: optimizeQueryPlan (map <string, MyDB_Tab
 			// RightCNF ← all clauses in C referring only to atts in Right
 			// TopCNF ← all clauses in C not in LeftCNF & not in RightCNF
 			vector<ExprTreePtr> leftDisjunctions, rightDisjunctions, topDisjunctions;
-			for (auto d : allDisjunctions) {
-				
+			for (auto& disjunction : allDisjunctions) {
+				bool refersToLeft = false, refersToRight = false;
+
+				// Check if disjunction references any table in the left set
+				for (const auto& [tableAlias, _] : left) {
+					if (disjunction->referencesTable(tableAlias)) {
+						refersToLeft = true;
+						break;
+					}
+				}
+
+				// Check if disjunction references any table in the right set
+				for (const auto& [tableAlias, _] : right) {
+					if (disjunction->referencesTable(tableAlias)) {
+						refersToRight = true;
+						break;
+					}
+				}
+
+				if (refersToLeft && !refersToRight) {
+					leftDisjunctions.push_back(disjunction);
+				} else if (refersToRight && !refersToLeft) {
+					rightDisjunctions.push_back(disjunction);
+				} else {
+					topDisjunctions.push_back(disjunction);
+				}
 			}
 
 			// LeftAtts ← Atts(Left) and (A union Atts(TopCNF))
