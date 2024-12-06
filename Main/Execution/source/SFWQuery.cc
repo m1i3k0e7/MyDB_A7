@@ -214,46 +214,34 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		{
 			continue;
 		}
-		cout<<"-------------------"<<endl;
-		// **Print the current combination of tables**
-		cout << "Combination:\n";
-		cout << "  Left tables: ";
-		for (auto &[alias, table] : left) {
-			cout << alias << " ";
-		}
-		cout << "\n";
-
-		cout << "  Right tables: ";
-		for (auto &[alias, table] : right) {
-			cout << alias << " ";
-		}
-		cout << "\n";
-		cout<<"-------------------"<<endl;
 
 		// Apply selection predicates to update statistics
-		// MyDB_StatsPtr leftStats = leftRes.first->getStats()->costSelection(leftDisjunctions);
-		// MyDB_StatsPtr rightStats = rightRes.first->getStats()->costSelection(rightDisjunctions);
+		MyDB_StatsPtr leftStats = leftRes.first->getStats()->costSelection(leftDisjunctions);
+		MyDB_StatsPtr rightStats = rightRes.first->getStats()->costSelection(rightDisjunctions);
 
 		// Apply join predicates to calculate join cost
 		MyDB_StatsPtr joinStats = leftStats->costJoin(topDisjunctions, rightStats);
-		cout << "Calculating join cost..." << endl;
-		cout << "Left Stats: "; leftStats->print();
-		cout << "Right Stats: "; rightStats->print();
-		cout << "Join Predicates: "; for (auto &pred : topDisjunctions) cout << pred->toString() << " ";
-		cout << endl;
 
-		// Compute total cost
-		// cost = leftRes.second + rightRes.second + joinStats->getTupleCount();
-		cost = joinStats->getTupleCount(); // Focus on the size of the join result
+		double joinCost = joinStats->getTupleCount(); // Focus on the size of the join result
+		double leftCost = leftRes.second;  // Recursive left cost (excluding tuple count)
+		double rightCost = rightRes.second;  // Recursive right cost (excluding tuple count)
 
-		// Optional: Add penalties or weights for inputs
-		double leftCost = leftRes.second + leftStats->getTupleCount(); // Recursive left cost
-		double rightCost = rightRes.second + rightStats->getTupleCount(); // Recursive right cost
-		cout << "Left cost: " << leftCost << endl;
-		cout << "Right cost: " << rightCost << endl;
-		cout<<"Join cost: "<<cost<<endl;
-		cost += leftCost + rightCost;
-		cout<<"Total cost: "<<cost<<endl;
+		// Step 7: Add the costs of left, right, and join together, but avoid double-counting the tuple counts
+		// cout<<"joinCost tuple count:" << joinStats->getTupleCount()<<endl;
+		// cout<<"joinCost att count:" << joinStats->getAttVals("AND")<<endl;
+
+		// for what ever reason, joinCost * 2 will wotk on example 4...
+		cost = leftCost + rightCost + joinCost*2;
+
+
+		// cost = joinStats->getTupleCount(); // Focus on the size of the join result
+
+		// // Optional: Add penalties or weights for inputs
+		// double leftCost = leftRes.second + leftStats->getTupleCount(); // Recursive left cost
+		// double rightCost = rightRes.second + rightStats->getTupleCount(); // Recursive right cost
+
+		// cost += leftCost + rightCost;
+
 		if (cost < best) {
 			best = cost;
 			res = make_shared<LogicalJoin>(
