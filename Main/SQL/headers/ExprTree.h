@@ -5,6 +5,7 @@
 #include "MyDB_AttType.h"
 #include <string>
 #include <vector>
+#include <iostream>
 
 // create a smart pointer for database tables
 using namespace std;

@@ -23,14 +23,34 @@ struct PairEqual {
 		return lhs.first == rhs.first && lhs.second == rhs.second;
 	}
 };
+
 // builds and optimizes a logical query plan for a SFW query, returning the logical query plan
 pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePtr> &allTables)
 {
-
 	// here we call the recursive, exhaustive enum. algorithm
 	// return optimizeQueryPlan (...);
 	MyDB_SchemaPtr totSchema = make_shared<MyDB_Schema>();
-	return optimizeQueryPlan(allTables, totSchema, allDisjunctions);
+	cout << "Optimizing query plan...\n";
+	print();
+	
+	map<string, MyDB_TablePtr> tables;
+	for (auto &[table, alias] : tablesToProcess)
+	{
+		tables[alias] = allTables[table];
+	}
+
+	cout << "Tables: " << tables.size() << "\n";
+	for (auto &entry : tables)
+	{	
+		cout << "Table: " << entry.first << "\n";
+		for (auto &att : entry.second->getSchema()->getAtts())
+		{
+			totSchema->appendAtt(att);
+		}
+	}
+	// cout << "Disjunctions: " << allDisjunctions.size() << "\n";
+
+	return optimizeQueryPlan(tables, totSchema, allDisjunctions);
 }
 
 // builds and optimizes a logical query plan for a SFW query, returning the logical query plan
@@ -46,12 +66,15 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 	{
 		auto alias = allTables.begin()->first;
 		auto table = allTables.begin()->second->alias(alias);
+
 		res = make_shared<LogicalTableScan>(table, table, make_shared<MyDB_Stats>(table), allDisjunctions);
-		res->getStats()->costSelection(allDisjunctions);
-		best = res->getStats()->getTupleCount();
+		MyDB_StatsPtr stats = res->getStats()->costSelection(allDisjunctions);
+		best = stats->getTupleCount();
+		cout << "No joins\n";
+		cout << "Cost: " << best << "\n";
 		return make_pair(res, best);
 	}
-
+	
 	// multiple tables case
 	vector<pair<string, MyDB_TablePtr>> tables;
     for (auto &entry : allTables) {
@@ -75,9 +98,10 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 			}
 		}
 
-		if (left.empty() || right.empty() || checked.count(left)) {
+		if (left.empty() || right.empty() || checked.count(right)) {
             continue;
         }
+
         checked.insert(left);
 
 		// LeftCNF ← all clauses in C referring only to atts in Left
@@ -123,11 +147,8 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		}
 
 		// build A
-
 		std::unordered_set<std::pair<std::string, MyDB_AttTypePtr>, PairHash, PairEqual> allAtts;
-
-		for (auto s : totSchema->getAtts())
-		{
+		for (auto s : totSchema->getAtts()) {
 			allAtts.insert(s);
 		}
 
@@ -202,8 +223,8 @@ pair<LogicalOpPtr, double> SFWQuery ::optimizeQueryPlan(map<string, MyDB_TablePt
 		MyDB_StatsPtr joinStats = leftStats->costJoin(topDisjunctions, rightStats);
 
 		// Compute total cost
-		cost = leftRes.second + rightRes.second + joinStats->getTupleCount();
-
+		// cost = leftRes.second + rightRes.second + joinStats->getTupleCount();
+		cost = leftStats->getTupleCount() + rightStats->getTupleCount() + joinStats->getTupleCount();
 		if (cost < best) {
 			best = cost;
 			res = make_shared<LogicalJoin>(
